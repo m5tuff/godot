@@ -32,8 +32,8 @@
 #define ANIMATION_GRAPH_PLAYER_H
 
 #include "animation_player.h"
-#include "scene/3d/node_3d.h"
-#include "scene/3d/skeleton_3d.h"
+#include "scene/3d/skeleton.h"
+#include "scene/3d/spatial.h"
 #include "scene/resources/animation.h"
 
 class AnimationNodeBlendTree;
@@ -57,68 +57,62 @@ public:
 
 	Vector<Input> inputs;
 
-	real_t process_input(int p_input, real_t p_time, bool p_seek, real_t p_blend);
+	float process_input(int p_input, float p_time, bool p_seek, float p_blend);
 
 	friend class AnimationTree;
 
 	struct AnimationState {
 		Ref<Animation> animation;
-		double time = 0.0;
-		double delta = 0.0;
-		const Vector<real_t> *track_blends = nullptr;
-		real_t blend = 0.0;
-		bool seeked = false;
+		float time;
+		float delta;
+		const Vector<float> *track_blends;
+		float blend;
+		bool seeked;
+		bool add_directly;
 	};
 
 	struct State {
-		int track_count = 0;
+		int track_count;
 		HashMap<NodePath, int> track_map;
 		List<AnimationState> animation_states;
-		bool valid = false;
-		AnimationPlayer *player = nullptr;
-		AnimationTree *tree = nullptr;
+		bool valid;
+		AnimationPlayer *player;
+		AnimationTree *tree;
 		String invalid_reasons;
-		uint64_t last_pass = 0;
+		uint64_t last_pass;
 	};
 
-	Vector<real_t> blends;
-	State *state = nullptr;
+	Vector<float> blends;
+	State *state;
 
-	real_t _pre_process(const StringName &p_base_path, AnimationNode *p_parent, State *p_state, real_t p_time, bool p_seek, const Vector<StringName> &p_connections);
+	float _pre_process(const StringName &p_base_path, AnimationNode *p_parent, State *p_state, float p_time, bool p_seek, const Vector<StringName> &p_connections);
 	void _pre_update_animations(HashMap<NodePath, int> *track_map);
 
 	//all this is temporary
 	StringName base_path;
 	Vector<StringName> connections;
-	AnimationNode *parent = nullptr;
+	AnimationNode *parent;
 
 	HashMap<NodePath, bool> filter;
-	bool filter_enabled = false;
+	bool filter_enabled;
+	bool add_directly;
 
 	Array _get_filters() const;
 	void _set_filters(const Array &p_filters);
 	friend class AnimationNodeBlendTree;
-	real_t _blend_node(const StringName &p_subpath, const Vector<StringName> &p_connections, AnimationNode *p_new_parent, Ref<AnimationNode> p_node, real_t p_time, bool p_seek, real_t p_blend, FilterAction p_filter = FILTER_IGNORE, bool p_optimize = true, real_t *r_max = nullptr);
+	float _blend_node(const StringName &p_subpath, const Vector<StringName> &p_connections, AnimationNode *p_new_parent, Ref<AnimationNode> p_node, float p_time, bool p_seek, float p_blend, FilterAction p_filter = FILTER_IGNORE, bool p_optimize = true, float *r_max = nullptr);
 
 protected:
-	void blend_animation(const StringName &p_animation, real_t p_time, real_t p_delta, bool p_seeked, real_t p_blend);
-	real_t blend_node(const StringName &p_sub_path, Ref<AnimationNode> p_node, real_t p_time, bool p_seek, real_t p_blend, FilterAction p_filter = FILTER_IGNORE, bool p_optimize = true);
-	real_t blend_input(int p_input, real_t p_time, bool p_seek, real_t p_blend, FilterAction p_filter = FILTER_IGNORE, bool p_optimize = true);
+	void blend_animation(const StringName &p_animation, float p_time, float p_delta, bool p_seeked, float p_blend);
+	float blend_node(const StringName &p_sub_path, Ref<AnimationNode> p_node, float p_time, bool p_seek, float p_blend, FilterAction p_filter = FILTER_IGNORE, bool p_optimize = true);
+	float blend_input(int p_input, float p_time, bool p_seek, float p_blend, FilterAction p_filter = FILTER_IGNORE, bool p_optimize = true, bool p_add_directly = false);
 	void make_invalid(const String &p_reason);
 
 	static void _bind_methods();
 
-	void _validate_property(PropertyInfo &property) const override;
+	void _validate_property(PropertyInfo &property) const;
 
 	void _set_parent(Object *p_parent);
-
-	GDVIRTUAL0RC(Dictionary, _get_child_nodes)
-	GDVIRTUAL0RC(Array, _get_parameter_list)
-	GDVIRTUAL1RC(Ref<AnimationNode>, _get_child_by_name, StringName)
-	GDVIRTUAL1RC(Variant, _get_parameter_default_value, StringName)
-	GDVIRTUAL2RC(double, _process, double, bool)
-	GDVIRTUAL0RC(String, _get_caption)
-	GDVIRTUAL0RC(bool, _has_filter)
 
 public:
 	virtual void get_parameter_list(List<PropertyInfo> *r_list) const;
@@ -134,7 +128,7 @@ public:
 
 	virtual void get_child_nodes(List<ChildNode> *r_child_nodes);
 
-	virtual double process(double p_time, bool p_seek);
+	virtual float process(float p_time, bool p_seek);
 	virtual String get_caption() const;
 
 	int get_input_count() const;
@@ -171,7 +165,7 @@ class AnimationTree : public Node {
 	GDCLASS(AnimationTree, Node);
 
 public:
-	enum AnimationProcessCallback {
+	enum AnimationProcessMode {
 		ANIMATION_PROCESS_PHYSICS,
 		ANIMATION_PROCESS_IDLE,
 		ANIMATION_PROCESS_MANUAL,
@@ -179,34 +173,37 @@ public:
 
 private:
 	struct TrackCache {
-		bool root_motion = false;
-		uint64_t setup_pass = 0;
-		uint64_t process_pass = 0;
-		Animation::TrackType type = Animation::TrackType::TYPE_ANIMATION;
-		Object *object = nullptr;
+		bool root_motion;
+		uint64_t setup_pass;
+		uint64_t process_pass;
+		Animation::TrackType type;
+		Object *object;
 		ObjectID object_id;
 
 		TrackCache() {
+			root_motion = false;
+			setup_pass = 0;
+			process_pass = 0;
+			object = nullptr;
+			object_id = 0;
 		}
 		virtual ~TrackCache() {}
 	};
 
 	struct TrackCacheTransform : public TrackCache {
-#ifndef _3D_DISABLED
-		Node3D *node_3d = nullptr;
-		Skeleton3D *skeleton = nullptr;
-#endif // _3D_DISABLED
-		int bone_idx = -1;
-		bool loc_used = false;
-		bool rot_used = false;
-		bool scale_used = false;
+		Spatial *spatial;
+		Skeleton *skeleton;
+		int bone_idx;
 		Vector3 loc;
-		Quaternion rot;
-		real_t rot_blend_accum = 0.0;
+		Quat rot;
+		float rot_blend_accum;
 		Vector3 scale;
 
 		TrackCacheTransform() {
-			type = Animation::TYPE_POSITION_3D;
+			type = Animation::TYPE_TRANSFORM;
+			spatial = nullptr;
+			bone_idx = -1;
+			skeleton = nullptr;
 		}
 	};
 
@@ -221,28 +218,33 @@ private:
 	};
 
 	struct TrackCacheBezier : public TrackCache {
-		real_t value = 0.0;
+		float value;
 		Vector<StringName> subpath;
 		TrackCacheBezier() {
 			type = Animation::TYPE_BEZIER;
+			value = 0;
 		}
 	};
 
 	struct TrackCacheAudio : public TrackCache {
-		bool playing = false;
-		real_t start = 0.0;
-		real_t len = 0.0;
+		bool playing;
+		float start;
+		float len;
 
 		TrackCacheAudio() {
 			type = Animation::TYPE_AUDIO;
+			playing = false;
+			start = 0;
+			len = 0;
 		}
 	};
 
 	struct TrackCacheAnimation : public TrackCache {
-		bool playing = false;
+		bool playing;
 
 		TrackCacheAnimation() {
 			type = Animation::TYPE_ANIMATION;
+			playing = false;
 		}
 	};
 
@@ -251,29 +253,29 @@ private:
 
 	Ref<AnimationNode> root;
 
-	AnimationProcessCallback process_callback = ANIMATION_PROCESS_IDLE;
-	bool active = false;
+	AnimationProcessMode process_mode;
+	bool active;
 	NodePath animation_player;
 
 	AnimationNode::State state;
-	bool cache_valid = false;
+	bool cache_valid;
 	void _node_removed(Node *p_node);
 	void _caches_cleared();
 
 	void _clear_caches();
 	bool _update_caches(AnimationPlayer *player);
-	void _process_graph(real_t p_delta);
+	void _process_graph(float p_delta);
 
-	uint64_t setup_pass = 1;
-	uint64_t process_pass = 1;
+	uint64_t setup_pass;
+	uint64_t process_pass;
 
-	bool started = true;
+	bool started;
 
 	NodePath root_motion_track;
-	Transform3D root_motion_transform;
+	Transform root_motion_transform;
 
 	friend class AnimationNode;
-	bool properties_dirty = true;
+	bool properties_dirty;
 	void _tree_changed();
 	void _update_properties();
 	List<PropertyInfo> properties;
@@ -281,8 +283,8 @@ private:
 	HashMap<StringName, Variant> property_map;
 
 	struct Activity {
-		uint64_t last_pass = 0;
-		real_t activity = 0.0;
+		uint64_t last_pass;
+		float activity;
 	};
 
 	HashMap<StringName, Vector<Activity>> input_activity_map;
@@ -307,13 +309,13 @@ public:
 	void set_active(bool p_active);
 	bool is_active() const;
 
-	void set_process_callback(AnimationProcessCallback p_mode);
-	AnimationProcessCallback get_process_callback() const;
+	void set_process_mode(AnimationProcessMode p_mode);
+	AnimationProcessMode get_process_mode() const;
 
 	void set_animation_player(const NodePath &p_player);
 	NodePath get_animation_player() const;
 
-	TypedArray<String> get_configuration_warnings() const override;
+	virtual String get_configuration_warning() const;
 
 	bool is_state_invalid() const;
 	String get_invalid_state_reason() const;
@@ -321,10 +323,10 @@ public:
 	void set_root_motion_track(const NodePath &p_track);
 	NodePath get_root_motion_track() const;
 
-	Transform3D get_root_motion_transform() const;
+	Transform get_root_motion_transform() const;
 
-	real_t get_connection_activity(const StringName &p_path, int p_connection) const;
-	void advance(real_t p_time);
+	float get_connection_activity(const StringName &p_path, int p_connection) const;
+	void advance(float p_time);
 
 	void rename_parameter(const String &p_base, const String &p_new_base);
 
@@ -333,6 +335,6 @@ public:
 	~AnimationTree();
 };
 
-VARIANT_ENUM_CAST(AnimationTree::AnimationProcessCallback)
+VARIANT_ENUM_CAST(AnimationTree::AnimationProcessMode)
 
 #endif // ANIMATION_GRAPH_PLAYER_H
